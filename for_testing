@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# AquaControl (FastAPI JSON API + React/TypeScript SPA): install Python deps and frontend deps,
+# build the SPA, run pytest (+ vitest), then start uvicorn on :8000 serving API and frontend/dist.
+# Works when this file sits:
+#   - inside the project root (clone), or
+#   - next to a folder named pool_records/ that contains the app.
+# Usage: ./for_testing
+#        ./for_testing --cov
+#        PYTHON=/path/to/venv/bin/python ./for_testing
+#        SKIP_FRONTEND=1 ./for_testing     # API only (no node/npm needed; UI answers 503 until built)
+if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -d "$HERE/pool_records" ] && [ -f "$HERE/pool_records/app/main.py" ]; then
+  ROOT="$HERE"
+  APP="$HERE/pool_records"
+elif [ -f "$HERE/app/main.py" ]; then
+  ROOT="$HERE"
+  APP="$HERE"
+else
+  echo "error: cannot find pool_records app (looked for $HERE/pool_records and $HERE/app)" >&2
+  exit 1
+fi
+
+COVERAGE=""
+case "${1:-}" in
+  "") ;;
+  --cov) COVERAGE=1 ;;
+  *) echo "usage: $0 [--cov]" >&2; exit 2 ;;
+esac
+
+VENV="$APP/venv"
+REQUIREMENTS="$APP/requirements.txt"
+
+has_packages() {
+  "$1" -c "import pytest, uvicorn, fastapi, starlette, httpx, sqlalchemy, itsdangerous" 2>/dev/null
+}
+
+if [ -n "${PYTHON:-}" ]; then
+  if ! has_packages "$PYTHON"; then
+    echo "error: PYTHON=$PYTHON lacks required packages. Unset PYTHON or install -r $REQUIREMENTS" >&2
+    exit 1
+  fi
+else
+  for candidate in "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}" "$VENV/bin/python" "$APP/.venv/bin/python" python3; do
+    if [ -n "$candidate" ] && has_packages "$candidate"; then PYTHON="$candidate"; break; fi
+  done
+fi
+
+if [ -z "${PYTHON:-}" ]; then
+  echo "No Python with packages found; setting up $VENV"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "error: python3 not found" >&2; exit 1
+  fi
+  if [ ! -x "$VENV/bin/python" ]; then
+    echo "+ python3 -m venv $VENV"
+    python3 -m venv "$VENV" || { echo "error: venv failed (apt install python3-venv?)" >&2; exit 1; }
+  fi
+  echo "+ $VENV/bin/python -m pip install -q -r $REQUIREMENTS"
+  "$VENV/bin/python" -m pip install -q --disable-pip-version-check -r "$REQUIREMENTS"
+  PYTHON="$VENV/bin/python"
+fi
+
+echo "Python: $PYTHON"
+echo "App:    $APP"
+
+run() { echo; echo "+ $*"; "$@"; }
+
+FRONTEND="$APP/frontend"
+if [ -n "${SKIP_FRONTEND:-}" ]; then
+  echo "SKIP_FRONTEND set: not building the SPA"
+else
+  if [ ! -f "$FRONTEND/package.json" ]; then
+    echo "error: $FRONTEND/package.json not found" >&2; exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "error: npm not found (install Node.js 18+, or run SKIP_FRONTEND=1 ./for_testing)" >&2; exit 1
+  fi
+  if [ -f "$FRONTEND/package-lock.json" ]; then
+    echo; echo "+ cd $FRONTEND && npm ci"
+    (cd "$FRONTEND" && npm ci --no-audit --no-fund)
+  else
+    echo; echo "+ cd $FRONTEND && npm install"
+    (cd "$FRONTEND" && npm install --no-audit --no-fund)
+  fi
+  echo; echo "+ cd $FRONTEND && npm run build"
+  (cd "$FRONTEND" && npm run build)
+  echo; echo "+ cd $FRONTEND && npm test"
+  (cd "$FRONTEND" && npm test)
+fi
+
+if [ -n "$COVERAGE" ]; then
+  echo; echo "+ cd $APP && $PYTHON -m pytest -q --cov=app --cov-report=term-missing"
+  (cd "$APP" && "$PYTHON" -m pytest -q --cov=app --cov-report=term-missing)
+else
+  run "$PYTHON" -m pytest -q "$APP"
+fi
+
+PIDS=""
+cleanup() {
+  trap - EXIT INT TERM HUP
+  if [ -n "$PIDS" ]; then
+    echo; echo "Stopping app ($PIDS)..."
+    kill $PIDS 2>/dev/null || true
+    wait $PIDS 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+set -m
+echo; echo "+ cd $APP && $PYTHON -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+(cd "$APP" && exec "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port 8000) &
+APP_PID=$!
+PIDS="$APP_PID"
+set +m
+
+for i in $(seq 1 50); do
+  if ! kill -0 "$APP_PID" 2>/dev/null; then
+    echo "error: app exited during startup" >&2; exit 1
+  fi
+  if "$PYTHON" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=1)" 2>/dev/null; then
+    echo "ok: AquaControl -> http://127.0.0.1:8000"
+    break
+  fi
+  sleep 0.2
+  if [ "$i" -eq 50 ]; then
+    echo "error: app did not answer /api/health" >&2; exit 1
+  fi
+done
+
+cat <<INFO
+
+AquaControl is running (Ctrl+C stops it):
+  App     http://127.0.0.1:8000/
+  Health  http://127.0.0.1:8000/api/health
+  Demo    admin@aquacontrol.example / AquaDemo1!
+  (SPA is served from frontend/dist; for hot reload run "npm run dev" in frontend/ -> http://127.0.0.1:5173)
+INFO
+
+while kill -0 "$APP_PID" 2>/dev/null; do sleep 1; done
+echo "error: app stopped" >&2
+exit 1
