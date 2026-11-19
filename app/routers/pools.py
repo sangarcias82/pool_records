@@ -24,3 +24,4 @@ def list_pools(
 @router.get("/{pool_id}")
 def get_pool(pool_id: int, user: AppUser = Depends(require_user), db: Session = Depends(get_db)) -> dict:
     return serializers.pool(pool_service.get_pool(db, user.organization_id, pool_id))
+

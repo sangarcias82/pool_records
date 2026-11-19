@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app import serializers
-from app.auth import SESSION_USER_KEY, authenticate, get_lang, require_user, set_lang
+from app.auth import SESSION_USER_KEY, Unauthenticated, authenticate, get_lang, require_user, set_lang
 from app.db import get_db
-from app.i18n import t
 from app.models import AppUser
 from app.schemas import LoginIn
 
@@ -19,7 +18,7 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)) -> dic
         set_lang(request, body.lang)
     found = authenticate(db, body.login, body.password)
     if found is None:
-        raise HTTPException(status_code=401, detail=t(get_lang(request), "login.invalid"))
+        raise Unauthenticated("login.invalid")  # same answer for unknown email and bad password
     request.session[SESSION_USER_KEY] = found.id
     return serializers.user(found, get_lang(request))
 

@@ -4,9 +4,9 @@ import { useI18n } from "../i18n/I18nContext";
 import { LANGS } from "../i18n/translate";
 
 export function LangSwitch() {
-  const { lang, setLang } = useI18n();
+  const { lang, setLang, t } = useI18n();
   return (
-    <div className="lang-switch" role="group" aria-label="Language">
+    <div className="lang-switch" role="group" aria-label={t("nav.language")}>
       {LANGS.map((code) => (
         <button key={code} type="button" className={code === lang ? "active" : ""} onClick={() => setLang(code)}>{code.toUpperCase()}</button>
       ))}
@@ -15,7 +15,7 @@ export function LangSwitch() {
 }
 
 // Later features add their nav entries here.
-const NAV = [["/", "nav.home"], ["/clients", "nav.clients"]];
+const NAV = [["/", "nav.home"], ["/clients", "nav.clients"], ["/measurements", "nav.measurements"], ["/norm-rules", "nav.rules"]];
 
 export function Layout() {
   const { t } = useI18n();
@@ -26,7 +26,7 @@ export function Layout() {
     <div className="shell">
       <header className="topbar">
         <div className="brand"><span className="brand-drop" /><strong>{t("brand.name")}</strong></div>
-        <nav className="nav" aria-label="Main">
+        <nav className="nav" aria-label={t("nav.main")}>
           {NAV.map(([to, key]) => <NavLink key={to} to={to} end={to === "/"}>{t(key)}</NavLink>)}
         </nav>
         <div className="topbar-end">

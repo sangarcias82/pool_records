@@ -4,15 +4,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app import serializers
-from app.auth import require_roles, require_user
+from app.auth import require_capability, require_user
 from app.db import get_db
-from app.models import ROLE_ORG_ADMIN, ROLE_SUPERVISOR, AppUser
+from app.models import AppUser
 from app.schemas import ClientIn, PoolIn
 from app.services import clients as client_service
 from app.services import pools as pool_service
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
-manager = require_roles(ROLE_ORG_ADMIN, ROLE_SUPERVISOR)
+manager = require_capability("manage_clients")
 
 
 @router.get("")

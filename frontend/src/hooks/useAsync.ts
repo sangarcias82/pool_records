@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { errorMessage } from "../api/client";
 
 export interface AsyncState<T> {
   data: T | null;
-  error: string | null;
+  /** The raw error (``<Loaded>`` turns it into text in the current language). */
+  error: unknown;
 }
 
 /** Load data when ``deps`` change; ignores results of stale requests. */
@@ -13,7 +13,7 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]): AsyncState
     let stale = false;
     load().then(
       (data) => !stale && setState({ data, error: null }),
-      (err: unknown) => !stale && setState({ data: null, error: errorMessage(err) }),
+      (err: unknown) => !stale && setState({ data: null, error: err ?? new Error("unknown error") }),
     );
     return () => {
       stale = true;

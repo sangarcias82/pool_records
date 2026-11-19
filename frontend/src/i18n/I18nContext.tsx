@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Lang } from "../api/types";
 import { auth } from "../api/endpoints";
 import { LANG_STORAGE_KEY, detectLang, translate } from "./translate";
@@ -13,6 +13,11 @@ const I18nContext = createContext<I18nValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => detectLang(localStorage.getItem(LANG_STORAGE_KEY), navigator.language));
+
+  // <html lang> follows the app language (screen readers, hyphenation, spell checking in inputs).
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   const setLang = useCallback((next: Lang) => {
     localStorage.setItem(LANG_STORAGE_KEY, next);

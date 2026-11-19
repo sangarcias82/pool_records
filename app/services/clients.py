@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Client
+from app.services.scoping import get_owned, scoped_select
 from app.utils import BusinessError, clean_text
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -27,14 +27,11 @@ def _clean(data: dict) -> dict:
 
 
 def list_clients(db: Session, org_id: int) -> list[Client]:
-    return list(db.scalars(select(Client).where(Client.organization_id == org_id).order_by(Client.name)))
+    return list(db.scalars(scoped_select(Client, org_id).order_by(Client.name)))
 
 
 def get_client(db: Session, org_id: int, client_id: int) -> Client:
-    client = db.get(Client, client_id)
-    if client is None or client.organization_id != org_id:
-        raise BusinessError("err.not_found")
-    return client
+    return get_owned(db, Client, org_id, client_id)
 
 
 def create_client(db: Session, org_id: int, data: dict) -> Client:

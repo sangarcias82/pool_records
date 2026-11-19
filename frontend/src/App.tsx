@@ -5,6 +5,8 @@ import { Spinner } from "./components/ui";
 import { ClientDetailPage, ClientFormPage, ClientsListPage } from "./pages/Clients";
 import { DashboardPage } from "./pages/Dashboard";
 import { LoginPage } from "./pages/Login";
+import { MeasurementFormPage, MeasurementsListPage } from "./pages/Measurements";
+import { NormRulesPage } from "./pages/NormRules";
 import { NotFoundPage } from "./pages/NotFound";
 import { PoolFormPage } from "./pages/Pools";
 
@@ -27,6 +29,9 @@ export function App() {
           <Route path="clients/new" element={<ClientFormPage />} />
           <Route path="clients/:id" element={<ClientDetailPage />} />
           <Route path="clients/:clientId/pools/new" element={<PoolFormPage />} />
+          <Route path="measurements" element={<MeasurementsListPage />} />
+          <Route path="measurements/new" element={<MeasurementFormPage />} />
+          <Route path="norm-rules" element={<NormRulesPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>

@@ -1,47 +1,73 @@
 #!/usr/bin/env bash
-# AquaControl (FastAPI JSON API + React/TypeScript SPA): install Python deps and frontend deps,
-# build the SPA, run pytest (+ vitest), then start uvicorn on :8000 serving API and frontend/dist.
-# Works when this file sits:
-#   - inside the project root (clone), or
-#   - next to a folder named pool_records/ that contains the app.
-# Usage: ./for_testing
-#        ./for_testing --cov
+# AquaControl (FastAPI JSON API + React/TypeScript SPA): install Python deps and frontend deps, build the SPA,
+# run vitest + pytest, then start uvicorn on :8000 serving the API and frontend/dist.
+# Lives at the workspace root, next to the app folder: workspace/{for_testing,pool_records/} (the only copy).
+#
+# Usage: ./for_testing                # install, build, vitest, pytest (no coverage), serve :8000
+#        ./for_testing --cov          # same, with coverage reports + 90% gates (pytest: .coveragerc,
+#                                     #   vitest: src/lib via vite.config.ts); exits 1 below 90%
+#        ./for_testing --demo-data    # also load fake measurements (python -m app.demo_data) before serving
+#        ./for_testing --e2e          # also run the browser tests (Playwright) against a throwaway server + database
+#        ./for_testing --cov --demo-data --e2e
+#        ./for_testing --help
 #        PYTHON=/path/to/venv/bin/python ./for_testing
-#        SKIP_FRONTEND=1 ./for_testing     # API only (no node/npm needed; UI answers 503 until built)
+#        SKIP_FRONTEND=1 ./for_testing       # API only (no node/npm needed; UI answers 503 until built)
+#        PORT=8001 ./for_testing             # serve on another port (default 8000)
+# (end of usage)
+# Needs Python 3.10+ and Node.js 18+ (LTS 22 recommended). macOS (Homebrew):
+#        brew install python@3.12 node@22
+#        echo 'export PATH="$(brew --prefix node@22)/bin:$PATH"' >> ~/.zshrc && exec zsh   # node@22 is keg-only
+# Works with the macOS system bash (3.2). If "Permission denied": chmod +x for_testing (or: bash for_testing)
 if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-if [ -d "$HERE/pool_records" ] && [ -f "$HERE/pool_records/app/main.py" ]; then
-  ROOT="$HERE"
-  APP="$HERE/pool_records"
-elif [ -f "$HERE/app/main.py" ]; then
-  ROOT="$HERE"
-  APP="$HERE"
-else
-  echo "error: cannot find pool_records app (looked for $HERE/pool_records and $HERE/app)" >&2
+usage() { sed -n '/^# Usage:/,/^# (end of usage)/p' "$HERE/for_testing" | sed '$d' | sed 's/^# \{0,1\}//'; }
+
+COVERAGE=""
+DEMO_DATA=""
+E2E=""
+for arg in "$@"; do
+  case "$arg" in
+    --cov) COVERAGE=1 ;;
+    --demo-data) DEMO_DATA=1 ;;
+    --e2e) E2E=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "error: unknown option '$arg'" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+APP="$HERE/pool_records"
+if [ ! -f "$APP/app/main.py" ]; then
+  echo "error: cannot find the app at $APP (for_testing must sit next to the pool_records/ folder)" >&2
   exit 1
 fi
 
-COVERAGE=""
-case "${1:-}" in
-  "") ;;
-  --cov) COVERAGE=1 ;;
-  *) echo "usage: $0 [--cov]" >&2; exit 2 ;;
+case "$(uname -s)" in
+  Darwin) INSTALL_PY="brew install python@3.12"; INSTALL_NODE="brew install node@22  (then add \$(brew --prefix node@22)/bin to PATH)" ;;
+  *)      INSTALL_PY="install Python 3.10+ (Debian/Ubuntu: sudo apt install python3 python3-venv)"; INSTALL_NODE="install Node.js 22 LTS (https://nodejs.org or your package manager)" ;;
 esac
 
 VENV="$APP/venv"
 REQUIREMENTS="$APP/requirements.txt"
 
+py_ok() {
+  # Python 3.10 or newer.
+  "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
 has_packages() {
-  "$1" -c "import pytest, uvicorn, fastapi, starlette, httpx, sqlalchemy, itsdangerous" 2>/dev/null
+  # Python 3.10+ with every top-level import of requirements.txt; anything else is not used.
+  py_ok "$1" && "$1" -c "import fastapi, uvicorn, sqlalchemy, pydantic, pydantic_settings, itsdangerous, tzdata, httpx, pytest, pytest_cov" >/dev/null 2>&1
 }
 
 if [ -n "${PYTHON:-}" ]; then
+  if ! py_ok "$PYTHON"; then
+    echo "error: PYTHON=$PYTHON is not Python 3.10+. $INSTALL_PY" >&2; exit 1
+  fi
   if ! has_packages "$PYTHON"; then
-    echo "error: PYTHON=$PYTHON lacks required packages. Unset PYTHON or install -r $REQUIREMENTS" >&2
-    exit 1
+    echo "error: PYTHON=$PYTHON lacks required packages. Unset PYTHON or install -r $REQUIREMENTS" >&2; exit 1
   fi
 else
   for candidate in "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}" "$VENV/bin/python" "$APP/.venv/bin/python" python3; do
@@ -51,51 +77,117 @@ fi
 
 if [ -z "${PYTHON:-}" ]; then
   echo "No Python with packages found; setting up $VENV"
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "error: python3 not found" >&2; exit 1
+  # Versioned names first: on macOS a bare python3 may still be Apple's 3.9.
+  BASE_PY=""
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" >/dev/null 2>&1 && py_ok "$candidate"; then BASE_PY="$(command -v "$candidate")"; break; fi
+  done
+  if [ -z "$BASE_PY" ]; then
+    echo "error: Python 3.10+ not found (python3 is $(python3 --version 2>&1 || echo missing)). $INSTALL_PY" >&2; exit 1
+  fi
+  if [ -x "$VENV/bin/python" ] && ! py_ok "$VENV/bin/python"; then
+    echo "Existing venv uses $("$VENV/bin/python" --version 2>&1); recreating it with $BASE_PY"
+    rm -rf "$VENV"
   fi
   if [ ! -x "$VENV/bin/python" ]; then
-    echo "+ python3 -m venv $VENV"
-    python3 -m venv "$VENV" || { echo "error: venv failed (apt install python3-venv?)" >&2; exit 1; }
+    echo "+ $BASE_PY -m venv $VENV"
+    "$BASE_PY" -m venv "$VENV" || { echo "error: venv failed (Debian/Ubuntu: sudo apt install python3-venv)" >&2; exit 1; }
   fi
   echo "+ $VENV/bin/python -m pip install -q -r $REQUIREMENTS"
   "$VENV/bin/python" -m pip install -q --disable-pip-version-check -r "$REQUIREMENTS"
   PYTHON="$VENV/bin/python"
 fi
 
-echo "Python: $PYTHON"
+echo "Python: $PYTHON ($("$PYTHON" --version 2>&1))"
 echo "App:    $APP"
-
-run() { echo; echo "+ $*"; "$@"; }
 
 FRONTEND="$APP/frontend"
 if [ -n "${SKIP_FRONTEND:-}" ]; then
-  echo "SKIP_FRONTEND set: not building the SPA"
+  echo "warning: SKIP_FRONTEND is set in your environment (value '$SKIP_FRONTEND'): the SPA is NOT built;" >&2
+  echo "         only the API will work. If you did not mean this: unset SKIP_FRONTEND" >&2
 else
   if [ ! -f "$FRONTEND/package.json" ]; then
     echo "error: $FRONTEND/package.json not found" >&2; exit 1
   fi
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "error: npm not found (install Node.js 18+, or run SKIP_FRONTEND=1 ./for_testing)" >&2; exit 1
+  if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    echo "error: node/npm not found. $INSTALL_NODE  (or run SKIP_FRONTEND=1 ./for_testing)" >&2; exit 1
   fi
+  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+  if [ "$NODE_MAJOR" -lt 18 ]; then
+    echo "error: Node.js $(node --version) is too old; Vite 6 / Vitest 3 need Node 18+. $INSTALL_NODE" >&2; exit 1
+  fi
+  echo "Node:   $(node --version) / npm $(npm --version)"
   if [ -f "$FRONTEND/package-lock.json" ]; then
     echo; echo "+ cd $FRONTEND && npm ci"
-    (cd "$FRONTEND" && npm ci --no-audit --no-fund)
+    NPM_LOG="$(mktemp)"
+    if (cd "$FRONTEND" && npm ci --no-audit --no-fund) >"$NPM_LOG" 2>&1; then
+      grep -v "^npm notice" "$NPM_LOG" || true
+    else
+      # Show the reason, not npm's long usage text.
+      grep -E "npm (error|ERR!) (code|Missing|notarget|404|.*in sync|.*not in this registry|.*ETARGET)" "$NPM_LOG" | head -n 30 >&2 || true
+      echo "warning: npm ci failed (lockfile out of sync with this npm/platform or registry)." >&2
+      echo "warning: falling back to 'npm install', which UPDATES frontend/package-lock.json; review and commit it." >&2
+      echo; echo "+ cd $FRONTEND && npm install"
+      (cd "$FRONTEND" && npm install --no-audit --no-fund)
+    fi
+    rm -f "$NPM_LOG"
   else
     echo; echo "+ cd $FRONTEND && npm install"
     (cd "$FRONTEND" && npm install --no-audit --no-fund)
   fi
   echo; echo "+ cd $FRONTEND && npm run build"
   (cd "$FRONTEND" && npm run build)
-  echo; echo "+ cd $FRONTEND && npm test"
-  (cd "$FRONTEND" && npm test)
+  if [ ! -f "$FRONTEND/dist/index.html" ]; then
+    echo "error: npm run build finished but $FRONTEND/dist/index.html is missing" >&2; exit 1
+  fi
+  if [ -n "$COVERAGE" ]; then
+    echo; echo "+ cd $FRONTEND && npm run test:cov"
+    (cd "$FRONTEND" && npm run test:cov)
+  else
+    echo; echo "+ cd $FRONTEND && npm test"
+    (cd "$FRONTEND" && npm test)
+  fi
 fi
 
+# pytest runs from $APP so pytest.ini and .coveragerc (source, branch, fail_under) are picked up.
+# Without --cov: plain pytest. With --cov: coverage report + fail_under gate (non-zero exit below 90%).
 if [ -n "$COVERAGE" ]; then
-  echo; echo "+ cd $APP && $PYTHON -m pytest -q --cov=app --cov-report=term-missing"
-  (cd "$APP" && "$PYTHON" -m pytest -q --cov=app --cov-report=term-missing)
+  echo; echo "+ cd $APP && $PYTHON -m pytest -q --cov --cov-report=term-missing"
+  (cd "$APP" && "$PYTHON" -m pytest -q --cov --cov-report=term-missing)
 else
-  run "$PYTHON" -m pytest -q "$APP"
+  echo; echo "+ cd $APP && $PYTHON -m pytest -q"
+  (cd "$APP" && "$PYTHON" -m pytest -q)
+fi
+
+if [ -n "$E2E" ] && [ -n "${SKIP_FRONTEND:-}" ]; then
+  echo "error: --e2e needs the SPA; unset SKIP_FRONTEND" >&2; exit 1
+fi
+
+if [ -n "$DEMO_DATA" ]; then
+  # Uses pool_records/aquacontrol.db (the app's database); refuses to run twice (delete the .db to start over).
+  echo; echo "+ cd $APP && $PYTHON -m app.demo_data"
+  (cd "$APP" && "$PYTHON" -m app.demo_data)
+fi
+
+PORT="${PORT:-8000}"
+BASE="http://127.0.0.1:$PORT"
+DIST="$FRONTEND/dist"
+CHECK="$APP/scripts/runner_checks.py"
+
+# Another server on the port (an earlier run, another copy of the project) would answer instead of ours.
+if ! "$PYTHON" "$CHECK" port-free "$PORT"; then
+  echo >&2
+  echo "error: port $PORT is already in use: $("$PYTHON" "$CHECK" who "$PORT")." >&2
+  if command -v lsof >/dev/null 2>&1; then
+    echo "       Process listening on $PORT:" >&2
+    lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >&2 || true
+    echo "       Stop it with: kill <PID>   (or Ctrl+C in the terminal where it runs)" >&2
+  elif command -v ss >/dev/null 2>&1; then
+    ss -ltnp "sport = :$PORT" >&2 || true
+    echo "       Stop it with: kill <PID>   (or Ctrl+C in the terminal where it runs)" >&2
+  fi
+  echo "       Or serve this build on another port: PORT=8001 ./for_testing" >&2
+  exit 1
 fi
 
 PIDS=""
@@ -112,34 +204,85 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
+wait_for_health() {  # $1 = pid, $2 = base url
+  for i in $(seq 1 75); do
+    if ! kill -0 "$1" 2>/dev/null; then echo "error: server exited during startup (see the messages above)" >&2; return 1; fi
+    if "$PYTHON" "$CHECK" health "$2"; then return 0; fi
+    sleep 0.2
+  done
+  echo "error: $2/api/health did not answer" >&2; return 1
+}
+
+if [ -n "$E2E" ]; then
+  # Browser tests change data, so they get their own server on E2E_PORT with a temporary database (seed + demo data).
+  E2E_PORT="${E2E_PORT:-8765}"
+  E2E_BASE="http://127.0.0.1:$E2E_PORT"
+  if ! "$PYTHON" "$CHECK" port-free "$E2E_PORT"; then
+    echo "error: E2E_PORT $E2E_PORT is in use ($("$PYTHON" "$CHECK" who "$E2E_PORT")); set E2E_PORT=<free port>" >&2; exit 1
+  fi
+  E2E_DIR="$(mktemp -d)"
+  E2E_DB="sqlite:///$E2E_DIR/e2e.db"
+  echo; echo "+ cd $FRONTEND && npx playwright install chromium   (downloads the browser once, then no-op)"
+  (cd "$FRONTEND" && npx playwright install chromium)
+  echo; echo "+ DATABASE_URL=$E2E_DB $PYTHON -m app.demo_data"
+  (cd "$APP" && DATABASE_URL="$E2E_DB" "$PYTHON" -m app.demo_data)
+  set -m
+  (cd "$APP" && DATABASE_URL="$E2E_DB" FRONTEND_DIST="$FRONTEND/dist" exec "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port "$E2E_PORT" --log-level warning) &
+  E2E_PID=$!
+  PIDS="$E2E_PID"
+  set +m
+  wait_for_health "$E2E_PID" "$E2E_BASE" || exit 1
+  echo; echo "+ cd $FRONTEND && E2E_BASE_URL=$E2E_BASE npx playwright test"
+  E2E_STATUS=0
+  (cd "$FRONTEND" && E2E_BASE_URL="$E2E_BASE" npx playwright test) || E2E_STATUS=$?
+  kill "$E2E_PID" 2>/dev/null || true
+  wait "$E2E_PID" 2>/dev/null || true
+  PIDS=""
+  rm -rf "$E2E_DIR"
+  if [ "$E2E_STATUS" -ne 0 ]; then
+    echo "error: browser tests failed (details, screenshots and traces: $FRONTEND/e2e-results)" >&2; exit 1
+  fi
+fi
+
 set -m
-echo; echo "+ cd $APP && $PYTHON -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
-(cd "$APP" && exec "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port 8000) &
+# FRONTEND_DIST pins the folder this run just built (a FRONTEND_DIST in .env cannot point the server elsewhere).
+echo; echo "+ cd $APP && FRONTEND_DIST=$DIST $PYTHON -m uvicorn app.main:app --host 127.0.0.1 --port $PORT"
+(cd "$APP" && FRONTEND_DIST="$DIST" exec "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT") &
 APP_PID=$!
 PIDS="$APP_PID"
 set +m
 
-for i in $(seq 1 50); do
-  if ! kill -0 "$APP_PID" 2>/dev/null; then
-    echo "error: app exited during startup" >&2; exit 1
-  fi
-  if "$PYTHON" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=1)" 2>/dev/null; then
-    echo "ok: AquaControl -> http://127.0.0.1:8000"
-    break
-  fi
-  sleep 0.2
-  if [ "$i" -eq 50 ]; then
-    echo "error: app did not answer /api/health" >&2; exit 1
-  fi
-done
+wait_for_health "$APP_PID" "$BASE" || exit 1
+sleep 0.5
+if ! kill -0 "$APP_PID" 2>/dev/null; then
+  echo "error: app exited right after startup (see the messages above)" >&2; exit 1
+fi
+
+# What the browser will get at /: the SPA built by this run, or a clear reason why not.
+if SPA_PROBLEM="$("$PYTHON" "$CHECK" spa "$BASE")"; then
+  UI_LINE="  App     $BASE/   (UI from $DIST)"
+elif [ -n "${SKIP_FRONTEND:-}" ]; then
+  UI_LINE="  App     NOT BUILT: SKIP_FRONTEND is set, only the API works ($SPA_PROBLEM)"
+else
+  echo "error: the server does not serve the web UI built by this run." >&2
+  echo "       $SPA_PROBLEM" >&2
+  echo "       Expected $DIST/index.html to be served at $BASE/." >&2
+  exit 1
+fi
+echo "ok: AquaControl -> $BASE (pid $APP_PID)"
 
 cat <<INFO
 
 AquaControl is running (Ctrl+C stops it):
-  App     http://127.0.0.1:8000/
-  Health  http://127.0.0.1:8000/api/health
+$UI_LINE
+  Health  $BASE/api/health
+  API docs $BASE/docs
+  Params  $BASE/api/parameters   (sign in first, same browser)
+  Rules   $BASE/norm-rules       (ORG_ADMIN edits; others read only)
+  Measure $BASE/measurements     (list + filters; "New measurement" has the live preview)
+  API     $BASE/api/measurements (capture: POST, any role; filters pool_id, parameter_id, status, measured_from)
   Demo    admin@aquacontrol.example / AquaDemo1!
-  (SPA is served from frontend/dist; for hot reload run "npm run dev" in frontend/ -> http://127.0.0.1:5173)
+  (for hot reload run "npm run dev" in frontend/ -> http://127.0.0.1:5173)
 INFO
 
 while kill -0 "$APP_PID" 2>/dev/null; do sleep 1; done

@@ -1,0 +1,43 @@
+{
+  "_comment": "Contract shared by the server (tests/test_evaluation.py -> app/services/evaluation.py, app/utils.parse_float) and the SPA (src/lib/evaluation.test.ts -> src/lib/evaluation.ts). Change both sides together.",
+  "evaluate": [
+    {"name": "inside", "value": 7.4, "rule": {"id": 1, "min_value": 7.2, "max_value": 7.8, "classification": "NORMATIVE"}, "expected": {"status": "OK", "direction": null}},
+    {"name": "equal to min is inside", "value": 7.2, "rule": {"id": 1, "min_value": 7.2, "max_value": 7.8, "classification": "NORMATIVE"}, "expected": {"status": "OK", "direction": null}},
+    {"name": "equal to max is inside", "value": 7.8, "rule": {"id": 1, "min_value": 7.2, "max_value": 7.8, "classification": "NORMATIVE"}, "expected": {"status": "OK", "direction": null}},
+    {"name": "below min", "value": 6.9, "rule": {"id": 1, "min_value": 7.2, "max_value": 7.8, "classification": "NORMATIVE"}, "expected": {"status": "OUT_OF_RANGE", "direction": "LOW"}},
+    {"name": "above max", "value": 8.1, "rule": {"id": 1, "min_value": 7.2, "max_value": 7.8, "classification": "NORMATIVE"}, "expected": {"status": "OUT_OF_RANGE", "direction": "HIGH"}},
+    {"name": "no rule", "value": 7.4, "rule": null, "expected": {"status": "NO_RULE", "direction": null}},
+    {"name": "max-only inside", "value": 0.0, "rule": {"id": 4, "min_value": null, "max_value": 0.2, "classification": "NORMATIVE"}, "expected": {"status": "OK", "direction": null}},
+    {"name": "max-only above", "value": 0.21, "rule": {"id": 4, "min_value": null, "max_value": 0.2, "classification": "NORMATIVE"}, "expected": {"status": "OUT_OF_RANGE", "direction": "HIGH"}},
+    {"name": "max-only has no lower bound", "value": -5, "rule": {"id": 4, "min_value": null, "max_value": 0.2, "classification": "NORMATIVE"}, "expected": {"status": "OK", "direction": null}},
+    {"name": "min-only inside", "value": 700, "rule": {"id": 9, "min_value": 650, "max_value": null, "classification": "COMPLEMENTARY"}, "expected": {"status": "OK", "direction": null}},
+    {"name": "min-only below", "value": 600, "rule": {"id": 9, "min_value": 650, "max_value": null, "classification": "COMPLEMENTARY"}, "expected": {"status": "OUT_OF_RANGE", "direction": "LOW"}},
+    {"name": "single allowed value", "value": 28, "rule": {"id": 9, "min_value": 28, "max_value": 28, "classification": "COMPLEMENTARY"}, "expected": {"status": "OK", "direction": null}},
+    {"name": "just above a single value", "value": 28.01, "rule": {"id": 9, "min_value": 28, "max_value": 28, "classification": "COMPLEMENTARY"}, "expected": {"status": "OUT_OF_RANGE", "direction": "HIGH"}},
+    {"name": "unbounded rule (DB forbids; helper stays total)", "value": 1e9, "rule": {"id": 9, "min_value": null, "max_value": null, "classification": "NORMATIVE"}, "expected": {"status": "OK", "direction": null}}
+  ],
+  "parse_decimal": [
+    {"input": "7,4", "expected": 7.4},
+    {"input": "7.4", "expected": 7.4},
+    {"input": " 7,40 ", "expected": 7.4},
+    {"input": "-0,5", "expected": -0.5},
+    {"input": "+3", "expected": 3},
+    {"input": ".5", "expected": 0.5},
+    {"input": "7.", "expected": 7},
+    {"input": "1e3", "expected": 1000},
+    {"input": "2500,5", "expected": 2500.5},
+    {"input": "", "expected": null},
+    {"input": "   ", "expected": null},
+    {"input": "abc", "invalid": true},
+    {"input": "1_000", "invalid": true},
+    {"input": "1.000,5", "invalid": true},
+    {"input": "7,4,1", "invalid": true},
+    {"input": "7 4", "invalid": true},
+    {"input": "0x10", "invalid": true},
+    {"input": "inf", "invalid": true},
+    {"input": "NaN", "invalid": true},
+    {"input": "1e999", "invalid": true},
+    {"input": ",", "invalid": true},
+    {"input": "-", "invalid": true}
+  ]
+}

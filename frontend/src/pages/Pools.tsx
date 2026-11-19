@@ -4,10 +4,12 @@ import { errorMessage } from "../api/client";
 import { pools as poolApi } from "../api/endpoints";
 import type { Pool, PoolInput } from "../api/types";
 import { Field, FormPage } from "../components/ui";
+import { useBusy } from "../hooks/useBusy";
 import { useI18n } from "../i18n/I18nContext";
+import { formatNumber } from "../lib/format";
 
 export function PoolsTable({ rows }: { rows: Pool[] }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   if (rows.length === 0) return <p className="empty">{t("common.none")}</p>;
   return (
     <table className="table">
@@ -18,7 +20,7 @@ export function PoolsTable({ rows }: { rows: Pool[] }) {
         {rows.map((p) => (
           <tr key={p.id}>
             <td>{p.name}</td>
-            <td>{p.volume_liters.toLocaleString()}</td>
+            <td>{formatNumber(p.volume_liters, 0, lang)}</td>
             <td>{t(`env.${p.environment}`)}</td>
           </tr>
         ))}
@@ -34,6 +36,7 @@ export function PoolFormPage() {
   const clientId = Number(useParams().clientId);
   const [form, setForm] = useState<PoolInput>({ environment: "OUTDOOR" });
   const [error, setError] = useState<string | null>(null);
+  const { busy, run } = useBusy();
   const bind = (key: keyof PoolInput) => ({
     value: form[key] ?? "",
     onChange: (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value }),
@@ -41,11 +44,11 @@ export function PoolFormPage() {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    poolApi.create(clientId, form).then(() => navigate(`/clients/${clientId}`), (err) => setError(errorMessage(err)));
+    run(() => poolApi.create(clientId, form).then(() => navigate(`/clients/${clientId}`), (err) => setError(errorMessage(err, t))));
   };
 
   return (
-    <FormPage title={t("pools.new")} backTo={`/clients/${clientId}`} error={error} onSubmit={submit}>
+    <FormPage title={t("pools.new")} backTo={`/clients/${clientId}`} error={error} busy={busy} onSubmit={submit}>
       <Field label={t("field.name")}><input {...bind("name")} required /></Field>
       <Field label={t("field.volume")}><input inputMode="decimal" {...bind("volume_liters")} required /></Field>
       <Field label={t("field.environment")}>

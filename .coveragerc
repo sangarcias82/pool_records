@@ -1,0 +1,9 @@
+# Coverage settings for the backend (``app/``). `../for_testing --cov` (workspace root) runs pytest with coverage and enforces fail_under.
+[run]
+source = app
+branch = True
+
+[report]
+fail_under = 90
+show_missing = True
+skip_empty = True

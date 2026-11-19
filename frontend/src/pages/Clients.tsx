@@ -6,6 +6,7 @@ import type { ClientInput } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { Card, Field, FormPage, Loaded, PageHeader } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
+import { useBusy } from "../hooks/useBusy";
 import { useI18n } from "../i18n/I18nContext";
 import { PoolsTable } from "./Pools";
 
@@ -77,14 +78,15 @@ export function ClientFormPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState<ClientInput>({});
   const [error, setError] = useState<string | null>(null);
+  const { busy, run } = useBusy();
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    clientApi.create(form).then((created) => navigate(`/clients/${created.id}`), (err) => setError(errorMessage(err)));
+    run(() => clientApi.create(form).then((created) => navigate(`/clients/${created.id}`), (err) => setError(errorMessage(err, t))));
   };
 
   return (
-    <FormPage title={t("clients.new")} backTo="/clients" error={error} onSubmit={submit}>
+    <FormPage title={t("clients.new")} backTo="/clients" error={error} busy={busy} onSubmit={submit}>
       {FIELDS.map(([key, label]) => (
         <Field key={key} label={t(label)}>
           <input value={form[key] ?? ""} onChange={(e) => setForm({ ...form, [key]: e.target.value })} required={key === "name"} />

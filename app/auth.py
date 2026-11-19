@@ -8,14 +8,14 @@ import hmac
 import secrets
 from typing import Callable, Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
 from app.i18n import SUPPORTED_LANGS
-from app.models import AppUser, UserCredential
+from app.models import CAPABILITIES, AppUser, UserCredential
 
 SESSION_USER_KEY = "user_id"
 SESSION_LANG_KEY = "lang"
@@ -24,6 +24,13 @@ _ALGO = "pbkdf2_sha256"
 
 class Forbidden(Exception):
     def __init__(self, message_key: str = "forbidden"):
+        self.message_key = message_key
+
+
+class Unauthenticated(Exception):
+    """401 with a translated message (``app.deps.unauthenticated_handler``)."""
+
+    def __init__(self, message_key: str = "err.unauthenticated"):
         self.message_key = message_key
 
 
@@ -66,17 +73,25 @@ def authenticate(db: Session, email: str, password: str) -> Optional[AppUser]:
 
 
 def require_user(request: Request, db: Session = Depends(get_db)) -> AppUser:
-    """Session user or JSON 401 (the SPA reacts by showing the login screen)."""
+    """Session user or a translated JSON 401 (the SPA reacts by showing the login screen)."""
     user_id = request.session.get(SESSION_USER_KEY)
     user = db.scalar(select(AppUser).where(AppUser.id == user_id, AppUser.active.is_(True))) if user_id else None
     if user is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise Unauthenticated()
     return user
 
 
-def require_roles(*roles: str) -> Callable[..., AppUser]:
+def require_capability(capability: str) -> Callable[..., AppUser]:
+    """Dependency: the session user if their role holds ``capability`` (see ``models.CAPABILITIES``), else 403.
+
+    Unknown names fail when the router module is imported, so a typo can never silently lock a route open
+    or shut.
+    """
+    if capability not in CAPABILITIES:
+        raise ValueError(f"Unknown capability {capability!r}; declare it in app.models.CAPABILITIES")
+
     def _dependency(user: AppUser = Depends(require_user)) -> AppUser:
-        if user.role not in roles:
+        if not user.can(capability):
             raise Forbidden()
         return user
 

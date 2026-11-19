@@ -21,7 +21,7 @@ export function LoginPage() {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    login(email, password).then(() => navigate(target, { replace: true }), (err) => setError(errorMessage(err)));
+    login(email, password).then(() => navigate(target, { replace: true }), (err) => setError(errorMessage(err, t)));
   };
 
   return (

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import ENVIRONMENTS, Pool
 from app.services import clients as client_service
+from app.services.scoping import get_owned, scoped_select
 from app.utils import BusinessError, clean_text, parse_float
 
 MAX_VOLUME_LITERS = 100_000_000
@@ -26,17 +26,14 @@ def _clean(data: dict) -> dict:
 
 
 def list_pools(db: Session, org_id: int, client_id: Optional[int] = None) -> list[Pool]:
-    stmt = select(Pool).options(joinedload(Pool.client)).where(Pool.organization_id == org_id).order_by(Pool.name)
+    stmt = scoped_select(Pool, org_id).options(joinedload(Pool.client)).order_by(Pool.name)
     if client_id is not None:
         stmt = stmt.where(Pool.client_id == client_id)
     return list(db.scalars(stmt))
 
 
 def get_pool(db: Session, org_id: int, pool_id: int) -> Pool:
-    pool = db.get(Pool, pool_id)
-    if pool is None or pool.organization_id != org_id:
-        raise BusinessError("err.not_found")
-    return pool
+    return get_owned(db, Pool, org_id, pool_id)
 
 
 def create_pool(db: Session, org_id: int, client_id: int, data: dict) -> Pool:

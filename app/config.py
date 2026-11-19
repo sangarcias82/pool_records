@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     demo_password: str = "AquaDemo1!"
     frontend_dist: str = ""  # empty -> frontend/dist
     pbkdf2_iterations: int = 600_000  # tests lower it through the environment
+    # IANA zone of the organization: the date inside measurement folios (MES-YYYYMMDD-####) is the local date.
+    timezone: str = "America/Mexico_City"
 
 
 @lru_cache
